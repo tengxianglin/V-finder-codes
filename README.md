@@ -6,7 +6,7 @@ $$V\,U\,V = U^\dagger$$
 
 $$V\,U\,V = U^T$$
 
-$$V\,U\,V = U^*$$
+$$V\,U\,V = U^\ast$$
 
 ## Background
 

@@ -1,30 +1,30 @@
 # Usage Tutorial
 
-This tutorial guides you through encoding a Pauli operator V, generating a test set S, solving for V, and verifying results.
+- This tutorial guides you through encoding a Pauli operator $V$, generating a test set $S$, solving for $V$, and verifying results.
 
-## 1. Encoding a Known V
+## 1. Encoding a Known $V$
 
 - A single-qubit Pauli is mapped:
-  - I → 00
-  - X → 01
-  - Z → 10
-  - Y → 11
-- An N-qubit Pauli string V is represented as a 2N-bit vector:
-  - x[i]=1 if V has X or Y on qubit i
-  - z[i]=1 if V has Z or Y on qubit i
+  - $I \to 00$
+  - $X \to 01$
+  - $Z \to 10$
+  - $Y \to 11$
+- An $N$-qubit Pauli string $V$ is represented as a $2N$-bit vector:
+  - $x_i = 1$ if $V$ has $X$ or $Y$ on qubit $i$
+  - $z_i = 1$ if $V$ has $Z$ or $Y$ on qubit $i$
 - Example:
   ```python
   V = "X0,Z2,Y3"
   # x = [1,0,0,1]; z = [0,0,1,1]
   ```
 
-## 2. Generating Test Set S
+## 2. Generating Test Set $S$
 
-1. Choose N (number of qubits) and M (size of set).
-2. Randomly sample Pauli terms that anticommute or satisfy mode-specific relation with V:
-   - Dagger mode (`mode='dagger'`): pick terms P such that {P, V}=0
-   - Conjugate mode (`mode='conj'`): odd Y-count terms commute, even Y-count anticommute
-   - Transpose mode (`mode='transpose'`): odd Y-count terms anticommute, even Y-count commute
+1. Choose $N$ (number of qubits) and $M$ (size of set).
+2. Randomly sample Pauli terms that anticommute or satisfy mode-specific relation with $V$:
+   - Dagger mode (`mode='dagger'`): pick terms $P$ such that $\{P, V\} = 0$
+   - Conjugate mode (`mode='conj'`): odd $Y$-count terms commute, even $Y$-count terms anticommute
+   - Transpose mode (`mode='transpose'`): odd $Y$-count terms anticommute, even $Y$-count terms commute
 3. Use utility functions in `hamiltonian_utils.py`:
    ```python
    from hamiltonian_utils import generate_random_pauli, generate_qubit_ops, is_commute
@@ -41,13 +41,13 @@ This tutorial guides you through encoding a Pauli operator V, generating a test 
        return S
    ```
 
-## 3. Solving for V
+## 3. Solving for $V$
 
 - Call the solver API:
   ```python
   from hamiltonian_utils import find_pauli_mapping_operators
   result = find_pauli_mapping_operators(pauli_set=S, mode='dagger')
-  # result is a set of Pauli strings encoding V
+  # result is a set of Pauli strings encoding $V$
   computed_V = next(iter(result))
   ```
 
