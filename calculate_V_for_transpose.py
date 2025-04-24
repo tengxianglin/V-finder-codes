@@ -20,6 +20,9 @@ from hamiltonian_utils import (
 )
 
 
+# torch.set_default_device("cuda")  # Set default device to GPU if available
+
+
 def generate_1slot_paulis_transpose(
     base_pauli: str, num_qubits: int, target_count: int
 ):
@@ -39,9 +42,8 @@ def generate_1slot_paulis_transpose(
                 bool(op.strip().upper().startswith("Y")) for op in term.split(",")
             )
             should_anticommute = y_count % 2 == 1
-            if (
-                (should_anticommute and not is_commute(base_pauli, term))
-                or (not should_anticommute and is_commute(base_pauli, term))
+            if (should_anticommute and not is_commute(base_pauli, term)) or (
+                not should_anticommute and is_commute(base_pauli, term)
             ):
                 valid_items.add(term)
                 if len(valid_items) >= target_count:
@@ -65,9 +67,7 @@ def main():
     print(f"pauli_set generated, size: {len(pauli_set)}")
 
     # Time find_pauli_mapping_operators in 'transpose' mode
-    print(
-        f"Starting timer and running find_pauli_mapping_operators(mode='{mode}')..."
-    )
+    print(f"Starting timer and running find_pauli_mapping_operators(mode='{mode}')...")
     start_time = time.time()
     result_set = find_pauli_mapping_operators(pauli_set=pauli_set, mode=mode)
     elapsed = time.time() - start_time
@@ -75,7 +75,9 @@ def main():
 
     # Extract and print results, ensure exactly one element matching initial V
     if len(result_set) != 1:
-        raise RuntimeError(f"Expected single result V, got {len(result_set)}: {result_set}")
+        raise RuntimeError(
+            f"Expected single result V, got {len(result_set)}: {result_set}"
+        )
     found_V = next(iter(result_set))
     print(f"Computed V from minimal anticommuting set: {found_V}")
     print(f"Matches initial V: {found_V == V}")

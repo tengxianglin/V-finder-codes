@@ -17,6 +17,10 @@ from hamiltonian_utils import (
     is_commute,
 )
 
+import torch
+
+# torch.set_default_device("cuda")  # Set default device to GPU if available
+
 
 def generate_1slot_paulis_dagger(base_pauli: str, num_qubits: int, target_count: int):
     """
@@ -59,9 +63,7 @@ def main():
     print(f"pauli_set generated, size: {len(pauli_set)}")
 
     # Time find_pauli_mapping_operators
-    print(
-        f"Starting timer and running find_pauli_mapping_operators(mode='{mode}')..."
-    )
+    print(f"Starting timer and running find_pauli_mapping_operators(mode='{mode}')...")
     start_time = time.time()
     result_set = find_pauli_mapping_operators(pauli_set=pauli_set, mode=mode)
     elapsed = time.time() - start_time
@@ -69,7 +71,9 @@ def main():
 
     # Extract and print results, ensure exactly one element matching initial V
     if len(result_set) != 1:
-        raise RuntimeError(f"Expected single result V, got {len(result_set)}: {result_set}")
+        raise RuntimeError(
+            f"Expected single result V, got {len(result_set)}: {result_set}"
+        )
     found_V = next(iter(result_set))
     print(f"Computed V from minimal anticommuting set: {found_V}")
     print(f"Matches initial V: {found_V == V}")

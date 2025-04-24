@@ -19,6 +19,8 @@ from hamiltonian_utils import (
     is_commute,
 )
 
+# torch.set_default_device("cuda")  # Set default device to GPU if available
+
 
 def generate_1slot_paulis_conj(base_pauli: str, num_qubits: int, target_count: int):
     """
@@ -37,9 +39,8 @@ def generate_1slot_paulis_conj(base_pauli: str, num_qubits: int, target_count: i
                 bool(op.strip().upper().startswith("Y")) for op in term.split(",")
             )
             should_commute = y_count % 2 == 1
-            if (
-                (should_commute and is_commute(base_pauli, term))
-                or (not should_commute and not is_commute(base_pauli, term))
+            if (should_commute and is_commute(base_pauli, term)) or (
+                not should_commute and not is_commute(base_pauli, term)
             ):
                 valid_items.add(term)
                 if len(valid_items) >= target_count:
@@ -71,7 +72,9 @@ def main():
 
     # Extract and print results, ensure exactly one element matching initial V
     if len(result_set) != 1:
-        raise RuntimeError(f"Expected single result V, got {len(result_set)}: {result_set}")
+        raise RuntimeError(
+            f"Expected single result V, got {len(result_set)}: {result_set}"
+        )
     found_V = next(iter(result_set))
     print(f"Computed V from minimal anticommuting set: {found_V}")
     print(f"Matches initial V: {found_V == V}")
