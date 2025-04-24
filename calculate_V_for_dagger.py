@@ -2,15 +2,16 @@
 """
 example_dagger_minimal_anticommuting_time.py
 
-Example script to demonstrate the speed of find_minimal_anticommuting_set in mode='dagger'.
+Example script to demonstrate the speed of find_pauli_mapping_operators in mode='dagger'.
 - Randomly generate a Pauli term V
 - Use generate_anticommuting_items to create H_name_list
-- Time the execution of find_minimal_anticommuting_set(H_name_list, mode='dagger')
+- Time the execution of find_pauli_mapping_operators(H_name_list, mode='dagger')
 - Print the initial V, len(H_name_list), elapsed time, resulting V, and consistency check
 """
 import time
+from typing import Set
 from hamiltonian_utils import (
-    find_minimal_anticommuting_set,
+    find_pauli_mapping_operators,
     generate_qubit_ops,
     generate_random_pauli,
     is_commute,
@@ -29,12 +30,14 @@ def generate_1slot_paulis_dagger(base_pauli: str, num_qubits: int, target_count:
     Returns:
         List[str]: Terms anticommute with base_pauli.
     """
-    valid_items = []
+    valid_items: Set[str] = set()
     while len(valid_items) < target_count:
         candidates = generate_qubit_ops(num_qubits, target_count)
         for term in candidates:
-            if not is_commute(base_pauli, term) and term not in valid_items:
-                valid_items.append(term)
+            if term in valid_items:
+                continue
+            if not is_commute(base_pauli, term):
+                valid_items.add(term)
                 if len(valid_items) >= target_count:
                     break
     return valid_items
@@ -50,24 +53,26 @@ def main():
     V = generate_random_pauli(num_qubits)
     print(f"Initial randomly generated {num_qubits}-qubit Pauli term V: {V}")
 
-    # Generate H_name_list
+    # Generate pauli_set of anticommuting items
     print(f"Generating {target_count} anticommuting items based on V...")
-    H_name_list = generate_1slot_paulis_dagger(V, num_qubits, target_count)
-    print(f"H_name_list generated, length: {len(H_name_list)}")
+    pauli_set = generate_1slot_paulis_dagger(V, num_qubits, target_count)
+    print(f"pauli_set generated, size: {len(pauli_set)}")
 
-    # Time find_minimal_anticommuting_set
+    # Time find_pauli_mapping_operators
     print(
-        f"Starting timer and running find_minimal_anticommuting_set(mode='{mode}')..."
+        f"Starting timer and running find_pauli_mapping_operators(mode='{mode}')..."
     )
     start_time = time.time()
-    result_set = find_minimal_anticommuting_set(H_name_list=H_name_list, mode=mode)
+    result_set = find_pauli_mapping_operators(pauli_set=pauli_set, mode=mode)
     elapsed = time.time() - start_time
-    print(f"find_minimal_anticommuting_set elapsed time: {elapsed:.6f} seconds")
+    print(f"find_pauli_mapping_operators elapsed time: {elapsed:.6f} seconds")
 
-    # Extract and print results
-    found_V = result_set[0] if result_set else None
-    print(f"First element of result set V: {found_V}")
-    print(f"Does initial V match computed V? {found_V == V}")
+    # Extract and print results, ensure exactly one element matching initial V
+    if len(result_set) != 1:
+        raise RuntimeError(f"Expected single result V, got {len(result_set)}: {result_set}")
+    found_V = next(iter(result_set))
+    print(f"Computed V from minimal anticommuting set: {found_V}")
+    print(f"Matches initial V: {found_V == V}")
 
 
 if __name__ == "__main__":

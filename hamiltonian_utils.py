@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """
-anticommuting_utils.py
+hamiltonian_utils.py
 
-Utility module for generating Pauli terms under different commutation conditions
-and finding minimal anticommuting sets.
+Utility module for finding a Pauli operator V that maps U to U†, Uᵀ, or U* by solving minimal anticommuting sets.
+
+Pauli-to-binary mapping (single-qubit):
+  I → 00
+  X → 01
+  Z → 10
+  Y → 11  (X and Z both present)
+
+An N-qubit Pauli string is encoded as a 2N-bit vector (x|z), where x[i]=1 if X or Y on qubit i, z[i]=1 if Z or Y on qubit i.
+
+Gaussian elimination over GF(2) solves V by constructing a linear system A x = b, where rows correspond to input Paulis and b encodes the mode ('dagger','conj','transpose').
+Complexity: O(M·N^2) for M terms and N qubits.
 
 Exports:
-  - generate_anticommuting_items: generate terms that anticommute with a base term
-  - generate_conj_items: generate terms for 'conj' mode
-  - generate_transpose_items: generate terms for 'transpose' mode
-  - find_minimal_anticommuting_set: wrapper to search minimal set (all modes)
+  - is_commute: check Pauli commute relation
+  - generate_all_paulis, generate_random_pauli, generate_qubit_ops
+  - find_pauli_mapping_operators: solve for V via Gaussian elimination
 """
 import itertools
 import os
 import pickle
 import random
 
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
 import torch
 
@@ -134,24 +143,25 @@ def generate_qubit_ops(num_qubits: int, num_item: int) -> List[str]:
     return list(result)
 
 
-def find_minimal_anticommuting_set(H_name_list: List[str], mode: str) -> List[str]:
+def find_pauli_mapping_operators(pauli_set: Set[str], mode: str) -> Set[str]:
     """
-    Given a list of Pauli strings, find a minimal set of Pauli operators such that
-    each operator in the input list anticommutes (or satisfies the specified mode) with at least one operator in the output set.
+    Solve for Pauli V given input pauli_set and mode using Gaussian elimination over GF(2).
 
-    Modes:
-        - "dagger": b_value is always 1
-        - "conj": b_value = 1 if parity of x*z is even else 0
-        - "transpose": b_value = 0 if parity of x*z is even else 1 (opposite of conj)
+    Input:
+        pauli_set: set of Pauli strings like "X0,Z1,Y2" representing M operators on N qubits.
+        mode: one of 'dagger','conj','transpose' specifying target relation V U V† = U† etc.
+    Output:
+        Set of Pauli strings encoding V as minimal anticommuting basis.
 
-    Args:
-        H_name_list (List[str]): A list of Pauli strings (e.g., ["X0", "Y0"]).
-        mode (str): "dagger", "conj", or "transpose".
+    Algorithm:
+      1. Convert each input Pauli to (x,z) bit vectors.
+      2. Build matrix A|b of size M×(2N+1), where b[i]=get_b_value(x_i,z_i,mode).
+      3. Perform Gaussian elimination (gf2_solve) to find x||z solving A x = b mod 2.
+      4. Convert solution bits back to Pauli string.
+      5. Mark covered inputs and iterate until all are satisfied.
 
-    Returns:
-        List[str]: A minimal set of Pauli strings that anticommute (or satisfy mode) with the input set.
+    Complexity: O(M·N^2) for elimination and covering steps.
     """
-
     def pauli_to_bits(pauli_str: str, num_qubits: int) -> Tuple[List[int], List[int]]:
         x_bits = [0] * num_qubits
         z_bits = [0] * num_qubits
@@ -181,6 +191,10 @@ def find_minimal_anticommuting_set(H_name_list: List[str], mode: str) -> List[st
         return ",".join(terms) if terms else "I"
 
     def gf2_solve(A_b: torch.Tensor) -> Tuple[bool, List[int]]:
+        """
+        Perform in-place Gaussian elimination on A|b over GF(2) to solve for x.
+        Returns (True, solution_bits) if solvable.
+        """
         A = A_b.clone()
         n_rows, m_plus1 = A.shape
         n_vars = m_plus1 - 1
@@ -216,14 +230,14 @@ def find_minimal_anticommuting_set(H_name_list: List[str], mode: str) -> List[st
     num_qubits = (
         max(
             int(term[1:])
-            for name in H_name_list
+            for name in pauli_set
             for term in name.split(",")
             if term[1:].isdigit()
         )
         + 1
     )
 
-    pauli_bits = [pauli_to_bits(p, num_qubits) for p in H_name_list]
+    pauli_bits = [pauli_to_bits(p, num_qubits) for p in pauli_set]
 
     def get_b_value(x, z, mode):
         if mode == "dagger":
