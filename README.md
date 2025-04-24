@@ -2,11 +2,11 @@
 
 One-line description: Find the Pauli operator $V$ that maps a given Pauli operator U to its inverse, transpose, or conjugate via:
 
-$$V\,U\,V = U^\dagger$$
+$$VUV = U^\dagger$$
 
-$$V\,U\,V = U^T$$
+$$VUV = U^T$$
 
-$$V\,U\,V = U^\ast$$
+$$VUV = U^\ast$$
 
 ## Background
 
