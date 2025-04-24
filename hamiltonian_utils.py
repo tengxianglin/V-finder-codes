@@ -144,39 +144,54 @@ def generate_qubit_ops(num_qubits: int, num_item: int) -> List[str]:
 
 
 # 1) Build augmented binary matrix (A|b) in one pass
-def map_paulis_to_aug_matrix(pauli_set: Set[str], mode: str) -> Tuple[torch.Tensor, int]:
+def map_paulis_to_aug_matrix(
+    pauli_set: Set[str], mode: str
+) -> Tuple[torch.Tensor, int]:
     """Map each Pauli in pauli_set to a single augmented row [x|z|b] over GF(2)."""
     # determine number of qubits
     num_qubits = (
         max(
-            int(term[1:]) for name in pauli_set
-            for term in name.split(",") if term and term[1:].isdigit()
-        ) + 1
+            int(term[1:])
+            for name in pauli_set
+            for term in name.split(",")
+            if term and term[1:].isdigit()
+        )
+        + 1
     )
+
     def pauli_to_bits(s: str):
-        x = [0]*num_qubits; z = [0]*num_qubits
+        x = [0] * num_qubits
+        z = [0] * num_qubits
         for term in s.split(","):
             t = term.strip()
-            if not t or t[0]=="I": continue
+            if not t or t[0] == "I":
+                continue
             op, idx = t[0], int(t[1:])
-            if op=="X": x[idx]=1
-            elif op=="Z": z[idx]=1
-            elif op=="Y": x[idx]=1; z[idx]=1
+            if op == "X":
+                x[idx] = 1
+            elif op == "Z":
+                z[idx] = 1
+            elif op == "Y":
+                x[idx] = 1
+                z[idx] = 1
         return x, z
+
     def get_b(x, z):
-        if mode=="dagger":
+        if mode == "dagger":
             return 1
-        same = sum(a&b for a,b in zip(x,z))
-        if mode=="conj":
-            return 1 if same%2==0 else 0
-        if mode=="transpose":
-            return 0 if same%2==0 else 1
+        same = sum(a & b for a, b in zip(x, z))
+        if mode == "conj":
+            return 1 if same % 2 == 0 else 0
+        if mode == "transpose":
+            return 0 if same % 2 == 0 else 1
         raise ValueError(f"Unknown mode: {mode}")
+
     rows = []
     for p in pauli_set:
         x, z = pauli_to_bits(p)
         rows.append(x + z + [get_b(x, z)])
     return torch.tensor(rows, dtype=torch.int32), num_qubits
+
 
 # 2) Module‐level GF(2) Gaussian elimination
 def gf2_solve(A_b: torch.Tensor) -> Tuple[bool, List[int]]:
@@ -187,12 +202,14 @@ def gf2_solve(A_b: torch.Tensor) -> Tuple[bool, List[int]]:
     pivot_row = 0
     pivot_cols: List[int] = []
     for col in range(n_vars):
-        if pivot_row>=n_rows: break
+        if pivot_row >= n_rows:
+            break
         sub = A[pivot_row:, col]
         nz = torch.nonzero(sub, as_tuple=False)
-        if nz.numel()==0: continue
+        if nz.numel() == 0:
+            continue
         r = pivot_row + nz[0].item()
-        if r!=pivot_row:
+        if r != pivot_row:
             A[[pivot_row, r]] = A[[r, pivot_row]]
         mask = A[:, col].bool()
         mask[pivot_row] = False
@@ -211,16 +228,18 @@ def gf2_solve(A_b: torch.Tensor) -> Tuple[bool, List[int]]:
     x[cols] = bvals.to(torch.int32)
     return x.tolist()
 
+
 # 3) Recursive solver: peel off one solution at a time
 def recursive_gf2_solve(A_b: torch.Tensor) -> List[List[int]]:
     """Recursively solve A_b, collect each solution vector until all rows are removed."""
     solutions: List[List[int]] = []
+
     def _recurse(mat: torch.Tensor):
-        if mat.size(0)==0:
+        if mat.size(0) == 0:
             return
         sol = gf2_solve(mat)
         solutions.append(sol)
-        num_vars = mat.size(1)-1
+        num_vars = mat.size(1) - 1
         nq = num_vars // 2
         z_sol = torch.tensor(sol[:nq], dtype=torch.int32)
         x_sol = torch.tensor(sol[nq:], dtype=torch.int32)
@@ -230,8 +249,10 @@ def recursive_gf2_solve(A_b: torch.Tensor) -> List[List[int]]:
         keep = dot != b
         if keep.any():
             _recurse(mat[keep])
+
     _recurse(A_b)
     return solutions
+
 
 # 4) Convert solution bit‐vectors back to Pauli strings
 def bits_matrix_to_pauli(solutions: List[List[int]], num_qubits: int) -> List[str]:
@@ -241,9 +262,12 @@ def bits_matrix_to_pauli(solutions: List[List[int]], num_qubits: int) -> List[st
         z, x = sol[:num_qubits], sol[num_qubits:]
         terms = []
         for i, (qx, qz) in enumerate(zip(x, z)):
-            if qx==1 and qz==0: terms.append(f"X{i}")
-            elif qx==0 and qz==1: terms.append(f"Z{i}")
-            elif qx==1 and qz==1: terms.append(f"Y{i}")
+            if qx == 1 and qz == 0:
+                terms.append(f"X{i}")
+            elif qx == 0 and qz == 1:
+                terms.append(f"Z{i}")
+            elif qx == 1 and qz == 1:
+                terms.append(f"Y{i}")
         paulis.append(",".join(terms) if terms else "I")
     return paulis
 
