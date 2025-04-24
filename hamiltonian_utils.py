@@ -143,148 +143,114 @@ def generate_qubit_ops(num_qubits: int, num_item: int) -> List[str]:
     return list(result)
 
 
-def find_pauli_mapping_operators(pauli_set: Set[str], mode: str) -> Set[str]:
-    """
-    Solve for Pauli V given input pauli_set and mode using Gaussian elimination over GF(2).
-
-    Input:
-        pauli_set: set of Pauli strings like "X0,Z1,Y2" representing M operators on N qubits.
-        mode: one of 'dagger','conj','transpose' specifying target relation V U V† = U† etc.
-    Output:
-        Set of Pauli strings encoding V as minimal anticommuting basis.
-
-    Algorithm:
-      1. Convert each input Pauli to (x,z) bit vectors.
-      2. Build matrix A|b of size M×(2N+1), where b[i]=get_b_value(x_i,z_i,mode).
-      3. Perform Gaussian elimination (gf2_solve) to find x||z solving A x = b mod 2.
-      4. Convert solution bits back to Pauli string.
-      5. Mark covered inputs and iterate until all are satisfied.
-
-    Complexity: O(M·N^2) for elimination and covering steps.
-    """
-    def pauli_to_bits(pauli_str: str, num_qubits: int) -> Tuple[List[int], List[int]]:
-        x_bits = [0] * num_qubits
-        z_bits = [0] * num_qubits
-        for term in pauli_str.split(","):
-            term = term.strip()
-            if not term or term[0] == "I":
-                continue
-            op, idx = term[0], int(term[1:])
-            if op == "X":
-                x_bits[idx] = 1
-            elif op == "Z":
-                z_bits[idx] = 1
-            elif op == "Y":
-                x_bits[idx] = 1
-                z_bits[idx] = 1
-        return x_bits, z_bits
-
-    def bits_to_pauli(q_x: List[int], q_z: List[int]) -> str:
-        terms = []
-        for i, (qx, qz) in enumerate(zip(q_x, q_z)):
-            if qx == 1 and qz == 0:
-                terms.append(f"X{i}")
-            elif qx == 0 and qz == 1:
-                terms.append(f"Z{i}")
-            elif qx == 1 and qz == 1:
-                terms.append(f"Y{i}")
-        return ",".join(terms) if terms else "I"
-
-    def gf2_solve(A_b: torch.Tensor) -> Tuple[bool, List[int]]:
-        """
-        Perform in-place Gaussian elimination on A|b over GF(2) to solve for x.
-        Returns (True, solution_bits) if solvable.
-        """
-        A = A_b.clone()
-        n_rows, m_plus1 = A.shape
-        n_vars = m_plus1 - 1
-        pivot_row = 0
-        pivot_cols: List[int] = []
-        for col in range(n_vars):
-            if pivot_row >= n_rows:
-                break
-            sub = A[pivot_row:, col]
-            nz = torch.nonzero(sub, as_tuple=False)
-            if nz.numel() == 0:
-                continue
-            r = pivot_row + nz[0].item()
-            if r != pivot_row:
-                A[[pivot_row, r]] = A[[r, pivot_row]]
-            mask = A[:, col].bool()
-            mask[pivot_row] = False
-            A[mask] ^= A[pivot_row]
-            pivot_cols.append(col)
-            pivot_row += 1
-        if pivot_cols:
-            row_idx = torch.arange(len(pivot_cols), dtype=torch.long)
-            col_idx = torch.tensor(pivot_cols, dtype=torch.long)
-            b_vals = A[row_idx, -1]
-        else:
-            row_idx = torch.empty(0, dtype=torch.long)
-            col_idx = torch.empty(0, dtype=torch.long)
-            b_vals = torch.empty(0, dtype=torch.int32)
-        x = torch.zeros(n_vars, dtype=torch.int32)
-        x[col_idx] = b_vals.to(torch.int32)
-        return True, x.tolist()
-
+# 1) Build augmented binary matrix (A|b) in one pass
+def map_paulis_to_aug_matrix(pauli_set: Set[str], mode: str) -> Tuple[torch.Tensor, int]:
+    """Map each Pauli in pauli_set to a single augmented row [x|z|b] over GF(2)."""
+    # determine number of qubits
     num_qubits = (
         max(
-            int(term[1:])
-            for name in pauli_set
-            for term in name.split(",")
-            if term[1:].isdigit()
-        )
-        + 1
+            int(term[1:]) for name in pauli_set
+            for term in name.split(",") if term and term[1:].isdigit()
+        ) + 1
     )
-
-    pauli_bits = [pauli_to_bits(p, num_qubits) for p in pauli_set]
-
-    def get_b_value(x, z, mode):
-        if mode == "dagger":
+    def pauli_to_bits(s: str):
+        x = [0]*num_qubits; z = [0]*num_qubits
+        for term in s.split(","):
+            t = term.strip()
+            if not t or t[0]=="I": continue
+            op, idx = t[0], int(t[1:])
+            if op=="X": x[idx]=1
+            elif op=="Z": z[idx]=1
+            elif op=="Y": x[idx]=1; z[idx]=1
+        return x, z
+    def get_b(x, z):
+        if mode=="dagger":
             return 1
-        elif mode == "conj":
-            same_position_count = sum(a & b for a, b in zip(x, z))
-            return 1 if same_position_count % 2 == 0 else 0
-        elif mode == "transpose":
-            same_position_count = sum(a & b for a, b in zip(x, z))
-            return 0 if same_position_count % 2 == 0 else 1
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
+        same = sum(a&b for a,b in zip(x,z))
+        if mode=="conj":
+            return 1 if same%2==0 else 0
+        if mode=="transpose":
+            return 0 if same%2==0 else 1
+        raise ValueError(f"Unknown mode: {mode}")
+    rows = []
+    for p in pauli_set:
+        x, z = pauli_to_bits(p)
+        rows.append(x + z + [get_b(x, z)])
+    return torch.tensor(rows, dtype=torch.int32), num_qubits
 
-    covered = [False] * len(pauli_bits)
-    Q = []
+# 2) Module‐level GF(2) Gaussian elimination
+def gf2_solve(A_b: torch.Tensor) -> Tuple[bool, List[int]]:
+    """In-place Gaussian elimination on A|b mod 2. Returns (True, solution_vector)."""
+    A = A_b.clone()
+    n_rows, m1 = A.shape
+    n_vars = m1 - 1
+    pivot_row = 0
+    pivot_cols: List[int] = []
+    for col in range(n_vars):
+        if pivot_row>=n_rows: break
+        sub = A[pivot_row:, col]
+        nz = torch.nonzero(sub, as_tuple=False)
+        if nz.numel()==0: continue
+        r = pivot_row + nz[0].item()
+        if r!=pivot_row:
+            A[[pivot_row, r]] = A[[r, pivot_row]]
+        mask = A[:, col].bool()
+        mask[pivot_row] = False
+        A[mask] ^= A[pivot_row]
+        pivot_cols.append(col)
+        pivot_row += 1
+    # back‐substitute b‐values
+    if pivot_cols:
+        rows = torch.arange(len(pivot_cols), dtype=torch.long)
+        cols = torch.tensor(pivot_cols, dtype=torch.long)
+        bvals = A[rows, -1]
+    else:
+        cols = torch.empty(0, dtype=torch.long)
+        bvals = torch.empty(0, dtype=torch.int32)
+    x = torch.zeros(n_vars, dtype=torch.int32)
+    x[cols] = bvals.to(torch.int32)
+    return x.tolist()
 
-    while not all(covered):
-        A_b = []
-        for i, (x, z) in enumerate(pauli_bits):
-            if not covered[i]:
-                b_value = get_b_value(x, z, mode)
-                A_b.append(x + z + [b_value])
-        A_b = torch.tensor(A_b, dtype=torch.int32)
-        ok, sol = gf2_solve(A_b)
-        if ok:
-            q_z = sol[:num_qubits]
-            q_x = sol[num_qubits:]
-        else:
-            idx = covered.index(False)
-            x0, z0 = pauli_bits[idx]
-            q_x = [0] * num_qubits
-            q_z = [0] * num_qubits
-            if x0[0] == 1 and z0[0] == 0:
-                q_z[0] = 1
-            elif x0[0] == 0 and z0[0] == 1:
-                q_x[0] = 1
-            else:
-                q_z[0] = 1
-        q_str = bits_to_pauli(q_x, q_z)
-        Q.append(q_str)
-        for i, (x, z) in enumerate(pauli_bits):
-            if not covered[i]:
-                dot = (
-                    sum(a & b for a, b in zip(x, q_z))
-                    + sum(a & b for a, b in zip(z, q_x))
-                ) % 2
-                b_value = get_b_value(x, z, mode)
-                if dot == b_value:
-                    covered[i] = True
-    return Q
+# 3) Recursive solver: peel off one solution at a time
+def recursive_gf2_solve(A_b: torch.Tensor) -> List[List[int]]:
+    """Recursively solve A_b, collect each solution vector until all rows are removed."""
+    solutions: List[List[int]] = []
+    def _recurse(mat: torch.Tensor):
+        if mat.size(0)==0:
+            return
+        sol = gf2_solve(mat)
+        solutions.append(sol)
+        num_vars = mat.size(1)-1
+        nq = num_vars // 2
+        z_sol = torch.tensor(sol[:nq], dtype=torch.int32)
+        x_sol = torch.tensor(sol[nq:], dtype=torch.int32)
+        x_mat, z_mat = mat[:, :nq], mat[:, nq:-1]
+        b = mat[:, -1]
+        dot = ((x_mat * z_sol) + (z_mat * x_sol)).sum(dim=1) % 2
+        keep = dot != b
+        if keep.any():
+            _recurse(mat[keep])
+    _recurse(A_b)
+    return solutions
+
+# 4) Convert solution bit‐vectors back to Pauli strings
+def bits_matrix_to_pauli(solutions: List[List[int]], num_qubits: int) -> List[str]:
+    """Map each [x|z] solution vector to its Pauli string representation."""
+    paulis: List[str] = []
+    for sol in solutions:
+        z, x = sol[:num_qubits], sol[num_qubits:]
+        terms = []
+        for i, (qx, qz) in enumerate(zip(x, z)):
+            if qx==1 and qz==0: terms.append(f"X{i}")
+            elif qx==0 and qz==1: terms.append(f"Z{i}")
+            elif qx==1 and qz==1: terms.append(f"Y{i}")
+        paulis.append(",".join(terms) if terms else "I")
+    return paulis
+
+
+# Replace the old implementation with a single‐line pipeline
+def find_pauli_mapping_operators(pauli_set: Set[str], mode: str) -> Set[str]:
+    """Find minimal Pauli V’s by a one‐shot matrix pipeline."""
+    A_b, num_qubits = map_paulis_to_aug_matrix(pauli_set, mode)
+    sols = recursive_gf2_solve(A_b)
+    return set(bits_matrix_to_pauli(sols, num_qubits))
