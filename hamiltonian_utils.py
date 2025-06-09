@@ -270,11 +270,58 @@ def bits_matrix_to_pauli(solutions: List[List[int]], num_qubits: int) -> List[st
                 terms.append(f"Y{i}")
         paulis.append(",".join(terms) if terms else "I")
     return paulis
-
+def bits_matrix_to_pauli_set(A: torch.Tensor) -> Set[str]:
+    """
+    Convert a 2N-bit matrix (each row: [x|z]) to a set of Pauli strings.
+    Args:
+        A: torch.Tensor of shape (num_rows, 2*num_qubits), dtype=int
+    Returns:
+        Set of Pauli strings
+    """
+    num_qubits = A.shape[1] // 2
+    paulis = set()
+    for row in A:
+        x = row[:num_qubits]
+        z = row[num_qubits:]
+        terms = []
+        for i, (qx, qz) in enumerate(zip(x, z)):
+            if qx == 1 and qz == 0:
+                terms.append(f"X{i}")
+            elif qx == 0 and qz == 1:
+                terms.append(f"Z{i}")
+            elif qx == 1 and qz == 1:
+                terms.append(f"Y{i}")
+        paulis.add(",".join(terms) if terms else "I")
+    return paulis
 
 # Replace the old implementation with a single‐line pipeline
-def find_pauli_mapping_operators(pauli_set: Set[str], mode: str) -> Set[str]:
+def find_pauli_mapping_operators(pauli_set: Set[str], mode: str, sort_mode: int = 0) -> Set[str]:
     """Find minimal Pauli V’s by a one‐shot matrix pipeline."""
     A_b, num_qubits = map_paulis_to_aug_matrix(pauli_set, mode)
+    def sort_aug_matrix(A_b: torch.Tensor, mode: int = 0) -> torch.Tensor:
+        """
+        Sort augmented matrix A_b by two possible rules:
+        mode=0: no sorting, return as is
+        mode=1: sort by row sum (number of 1s), then by first 1 position (ascending)
+        mode=2: sort by first 1 position, then by row sum (ascending)
+        """
+        if mode == 0:
+            return A_b
+        A = A_b[:, :-1]  # exclude last column (b)
+        row_sum = A.sum(dim=1)
+        # Find first 1 position in each row, set to large value if no 1
+        first_one = torch.where(A == 1, torch.arange(A.size(1)), A.size(1)).min(dim=1).values
+
+        import numpy as np
+        if mode == 1:
+            # sort by row_sum, then first_one
+            sort_idx = np.lexsort((first_one.numpy(), row_sum.numpy()))
+        else:
+            # sort by first_one, then row_sum
+            sort_idx = np.lexsort((row_sum.numpy(), first_one.numpy()))
+        return A_b[sort_idx]
+
+    # Example: mode=1 or mode=2, can be parameterized as needed
+    A_b = sort_aug_matrix(A_b, mode=sort_mode)
     sols = recursive_gf2_solve(A_b)
     return set(bits_matrix_to_pauli(sols, num_qubits))
